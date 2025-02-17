@@ -205,9 +205,9 @@ export default function ChatInterface() {
         </button>
 
         <div className="space-y-2">
-          {[currentChat, ...pastChats].map((chat) => (
+          {[currentChat, ...pastChats].map((chat, index) => (
             <div
-              key={chat.id}
+              key={index}
               className={`group relative rounded-lg text-black ${
                 chat.id === currentChat.id
                   ? 'bg-blue-100'
@@ -276,9 +276,9 @@ export default function ChatInterface() {
 
         {/* Mensagens */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {currentChat.messages.map((message) => (
+          {currentChat.messages.map((message, index) => (
             <div
-              key={message.id}
+              key={index}
               className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
