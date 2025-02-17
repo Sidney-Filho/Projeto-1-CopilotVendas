@@ -1,6 +1,5 @@
 "use client";
 
-import { v4 as uuidv4 } from 'uuid';
 import { useState, useEffect } from 'react';
 
 type Message = {
@@ -32,20 +31,20 @@ function DeleteModal({ isOpen, chatToDelete, onConfirm, onCancel }: DeleteModalP
       <div className="bg-white rounded-lg p-6 max-w-sm w-full">
         <h3 className="text-black text-lg font-semibold mb-4">Delete Chat</h3>
         <p className="text-gray-600 mb-6">
-          Are you sure you want delete <strong>{chatToDelete.preview}</strong>? You cant undo this action.
+          Tem certeza que deseja deletar <strong>{chatToDelete.preview}</strong>? Você não pode reverter esta ação.
         </p>
         <div className="flex space-x-3 justify-end">
           <button
             onClick={onCancel}
             className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={onConfirm}
             className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
           >
-            Delete
+            Deletar
           </button>
         </div>
       </div>
@@ -53,30 +52,31 @@ function DeleteModal({ isOpen, chatToDelete, onConfirm, onCancel }: DeleteModalP
   );
 }
 
+const generateId = (() => {
+  let counter = 0;
+  return () => {
+    const timestamp = Date.now().toString(36);
+    const uniquePart = (counter++).toString(36);
+    return `${timestamp}-${uniquePart}`;
+  };
+})();
+
 const FormattedDate = ({ date }: { date: Date }) => {
-  const [formattedDate, setFormattedDate] = useState('');
-
-  useEffect(() => {
-    setFormattedDate(date.toLocaleDateString());
-  }, [date]);
-
-  return <span>{formattedDate}</span>;
+  return <span>{date.toLocaleDateString('pt-BR')}</span>;
 };
 
 const FormattedTime = ({ date }: { date: Date }) => {
-  const [formattedTime, setFormattedTime] = useState('');
-
-  useEffect(() => {
-    setFormattedTime(date.toLocaleTimeString());
-  }, [date]);
-
-  return <span>{formattedTime}</span>;
+  return <span>{date.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })}</span>;
 };
 
 export default function ChatInterface() {
   const [currentChat, setCurrentChat] = useState<Chat>({
-    id: '',
-    preview: 'New Chat',
+    id: generateId(),
+    preview: 'Novo Chat',
     timestamp: new Date(),
     messages: []
   });
@@ -84,31 +84,46 @@ export default function ChatInterface() {
   const [inputText, setInputText] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
-    setCurrentChat(prev => ({
-      ...prev,
-      id: uuidv4() // Gera o ID apenas no cliente
-    }));
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const startNewChat = () => {
     if (currentChat.messages.length > 0) {
-      setPastChats(prev => [currentChat, ...prev]);
+      setPastChats(prev => {
+        if (!prev.some(chat => chat.id === currentChat.id)) {
+          return [currentChat, ...prev];
+        }
+        return prev;
+      });
     }
-    setCurrentChat({
-      id: uuidv4(),
-      preview: 'New Chat',
+
+    const newChat = {
+      id: generateId(),
+      preview: 'Novo Chat',
       timestamp: new Date(),
       messages: []
-    });
+    };
+
+    setCurrentChat(newChat);
+    setIsSidebarOpen(false);
   };
 
   const loadChat = (chat: Chat) => {
-    if (currentChat.messages.length > 0) {
+    if (currentChat.messages.length > 0 && !pastChats.some(c => c.id === currentChat.id)) {
       setPastChats(prev => [currentChat, ...prev.filter(c => c.id !== chat.id)]);
     }
     setCurrentChat(chat);
+    setIsSidebarOpen(false);
   };
 
   const handleDelete = (chat: Chat, e: React.MouseEvent) => {
@@ -128,25 +143,26 @@ export default function ChatInterface() {
     if (!inputText.trim() || isLoading) return;
 
     const userMessage: Message = {
-      id: uuidv4(),
+      id: generateId(),
       text: inputText,
       sender: 'user',
       timestamp: new Date()
     };
-    
+
     const updatedChat = {
       ...currentChat,
       preview: inputText,
       messages: [...currentChat.messages, userMessage]
     };
+
     setCurrentChat(updatedChat);
     setInputText('');
     setIsLoading(true);
 
     setTimeout(() => {
       const aiMessage: Message = {
-        id: uuidv4(),
-        text: "Hello! I'm a simple AI assistant. I can help you with basic tasks and answer questions.",
+        id: generateId(),
+        text: "Olá! Eu sou um simples assistente IA. Posso te ajudar respondendo simples questões.",
         sender: 'ai',
         timestamp: new Date()
       };
@@ -167,14 +183,27 @@ export default function ChatInterface() {
         onCancel={() => setChatToDelete(null)}
       />
 
-      <div className="w-64 bg-gray-50 border-r border-gray-200 p-4">
+      {/* Overlay para mobile */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Barra lateral */}
+      <div
+        className={`fixed lg:relative inset-y-0 left-0 w-64 bg-gray-50 border-r border-gray-200 p-4 transform transition-transform duration-200 ease-in-out ${
+          isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        } z-40`}
+      >
         <button
           onClick={startNewChat}
           className="w-full mb-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
         >
-          New Chat
+          Novo Chat
         </button>
-        
+
         <div className="space-y-2">
           {[currentChat, ...pastChats].map((chat) => (
             <div
@@ -219,11 +248,33 @@ export default function ChatInterface() {
         </div>
       </div>
 
+      {/* Conteudo principal */}
       <div className="flex-1 flex flex-col bg-white">
-        <div className="p-4 border-b border-gray-200">
+        {/* Header com Menu Hamburger */}
+        <div className="p-4 border-b border-gray-200 flex items-center">
+          <button
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="lg:hidden p-2 hover:bg-gray-100 rounded-lg mr-4"
+          >
+            <svg
+              className="w-6 h-6 text-gray-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16m-7 6h7"
+              />
+            </svg>
+          </button>
+
           <h1 className="text-xl font-semibold text-gray-800">AI Assistant</h1>
         </div>
 
+        {/* Mensagens */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {currentChat.messages.map((message) => (
             <div
@@ -259,13 +310,14 @@ export default function ChatInterface() {
           )}
         </div>
 
+        {/* Input de formulario */}
         <form onSubmit={handleSubmit} className="border-t border-gray-200 p-4">
           <div className="flex space-x-2">
             <input
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Type your message..."
+              placeholder="Escreva sua mensagem..."
               className="text-black flex-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               disabled={isLoading}
             />
@@ -280,7 +332,7 @@ export default function ChatInterface() {
                 transition-colors duration-200
               `}
             >
-              Send
+              Enviar
             </button>
           </div>
         </form>
