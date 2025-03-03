@@ -1,6 +1,39 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import axios from 'axios';
+
+// Defina um tipo para os dados retornados pela API
+type Inseminacao = {
+  id: number;
+  FAZENDA: string;
+  ESTADO: string;
+  MUNICÍPIO: string;
+  "Nº ANIMAL": number;
+  LOTE: string;
+  RAÇA: string;
+  CATEGORIA: string;
+  ECC: number;
+  CICLICIDADE: number;
+  PROTOCOLO: string;
+  "IMPLANTE P4": string;
+  EMPRESA: string;
+  "GnRH NA IA": number;
+  "PGF NO D0": number;
+  "Dose PGF retirada": string;
+  "Marca PGF retirada": string;
+  "Dose CE": string;
+  eCG: string;
+  "DOSE eCG": string;
+  TOURO: string;
+  "RAÇA TOURO": string;
+  "EMPRESA TOURO": string;
+  INSEMINADOR: string;
+  "Nº da IATF": string;
+  DG: number;
+  "VAZIA COM OU SEM CL": number;
+  PERDA: number;
+};
 
 type Message = {
   id: string;
@@ -159,19 +192,77 @@ export default function ChatInterface() {
     setInputText('');
     setIsLoading(true);
 
-    setTimeout(() => {
-      const aiMessage: Message = {
+    try {
+      // Envia o histórico da conversa junto com a mensagem
+      const response = await axios.post<{ response: Inseminacao[] }>('http://localhost:8000/chat', {
+        message: inputText,
+        context: currentChat.messages.map(msg => ({ role: msg.sender, content: msg.text }))
+      });
+
+      console.log('Resposta:', response.data);
+
+      // Verifica se a resposta é um array de objetos
+      if (Array.isArray(response.data.response)) {
+        // Formata os dados para exibição
+        const formattedResponse = response.data.response
+          .map((item: Inseminacao) => {
+            return `
+              Fazenda: ${item.FAZENDA},
+              Estado: ${item.ESTADO},
+              Município: ${item.MUNICÍPIO},
+              Nº Animal: ${item["Nº ANIMAL"]},
+              Raça: ${item.RAÇA},
+              Categoria: ${item.CATEGORIA},
+              ECC: ${item.ECC},
+              Protocolo: ${item.PROTOCOLO},
+              Inseminador: ${item.INSEMINADOR},
+              Perda: ${item.PERDA === 1 ? "Sim" : "Não"}
+            `;
+          })
+          .join("\n\n"); // Junta os itens com uma linha em branco entre eles
+        
+        const aiMessage: Message = {
+          id: generateId(),
+          text: formattedResponse,
+          sender: 'ai',
+          timestamp: new Date()
+        };
+
+        setCurrentChat(prev => ({
+          ...prev,
+          messages: [...prev.messages, aiMessage]
+        }));
+      } else {
+        // Se não for um array, trata como uma string
+        const aiMessage: Message = {
+          id: generateId(),
+          text: response.data.response || "Desculpe, houve um erro na resposta.",
+          sender: 'ai',
+          timestamp: new Date()
+        };
+
+        setCurrentChat(prev => ({
+          ...prev,
+          messages: [...prev.messages, aiMessage]
+        }));
+      }
+    } catch (error) {
+      console.error('Erro ao enviar mensagem:', error);
+      
+      const errorMessage: Message = {
         id: generateId(),
-        text: "Olá! Eu sou um simples assistente IA. Posso te ajudar respondendo simples questões.",
+        text: "Desculpe, houve um erro ao conectar com o servidor.",
         sender: 'ai',
         timestamp: new Date()
       };
+
       setCurrentChat(prev => ({
         ...prev,
-        messages: [...prev.messages, aiMessage]
+        messages: [...prev.messages, errorMessage]
       }));
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -248,7 +339,7 @@ export default function ChatInterface() {
         </div>
       </div>
 
-      {/* Conteudo principal */}
+      {/* Conteúdo principal */}
       <div className="flex-1 flex flex-col bg-white">
         {/* Header com Menu Hamburger */}
         <div className="p-4 border-b border-gray-200 flex items-center">
@@ -288,7 +379,7 @@ export default function ChatInterface() {
                     : 'bg-gray-100 text-gray-800 rounded-bl-none'
                 }`}
               >
-                <div>{message.text}</div>
+                <div style={{ whiteSpace: 'pre-line' }}>{message.text}</div>
                 <div className={`text-xs mt-1 ${
                   message.sender === 'user' ? 'text-blue-100' : 'text-gray-500'
                 }`}>
@@ -310,7 +401,7 @@ export default function ChatInterface() {
           )}
         </div>
 
-        {/* Input de formulario */}
+        {/* Input de formulário */}
         <form onSubmit={handleSubmit} className="border-t border-gray-200 p-4">
           <div className="flex space-x-2">
             <input
