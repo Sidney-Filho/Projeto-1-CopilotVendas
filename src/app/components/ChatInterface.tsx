@@ -47,6 +47,7 @@ type Chat = {
   preview: string;
   timestamp: Date;
   messages: Message[];
+  userName?: string; // Adicionado campo para nome do usuário
 };
 
 type DeleteModalProps = {
@@ -106,6 +107,24 @@ const FormattedTime = ({ date }: { date: Date }) => {
   })}</span>;
 };
 
+// Função para detectar o nome do usuário em uma mensagem
+const extractUserName = (message: string): string | null => {
+  const patterns = [
+    /(?:me\s+chamo|meu\s+nome\s+(?:é|e)|sou\s+(?:o|a))\s+([A-Z][a-zÀ-ú]+)/i,
+    /(?:pode\s+me\s+chamar\s+de)\s+([A-Z][a-zÀ-ú]+)/i,
+    /(?:meu\s+nome\s+(?:é|e))\s+([A-Z][a-zÀ-ú]+)/i
+  ];
+  
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  
+  return null;
+};
+
 export default function ChatInterface() {
   const [currentChat, setCurrentChat] = useState<Chat>({
     id: generateId(),
@@ -118,6 +137,15 @@ export default function ChatInterface() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [chatToDelete, setChatToDelete] = useState<Chat | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [userName, setUserName] = useState<string>('');
+
+  // Carregar o nome do usuário do localStorage quando o componente é montado
+  useEffect(() => {
+    const savedName = localStorage.getItem('userName');
+    if (savedName) {
+      setUserName(savedName);
+    }
+  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -144,7 +172,8 @@ export default function ChatInterface() {
       id: generateId(),
       preview: 'Novo Chat',
       timestamp: new Date(),
-      messages: []
+      messages: [],
+      userName: userName // Manter o nome do usuário no novo chat
     };
 
     setCurrentChat(newChat);
@@ -175,6 +204,14 @@ export default function ChatInterface() {
     e.preventDefault();
     if (!inputText.trim() || isLoading) return;
 
+    // Verificar se o usuário está se apresentando e extrair nome
+    const detectedName = extractUserName(inputText);
+    if (detectedName) {
+      setUserName(detectedName);
+      localStorage.setItem('userName', detectedName);
+      console.log('Nome do usuário salvo:', detectedName);
+    }
+
     const userMessage: Message = {
       id: generateId(),
       text: inputText,
@@ -185,7 +222,8 @@ export default function ChatInterface() {
     const updatedChat = {
       ...currentChat,
       preview: inputText,
-      messages: [...currentChat.messages, userMessage]
+      messages: [...currentChat.messages, userMessage],
+      userName: detectedName || userName // Atualizar o nome no chat se for detectado
     };
 
     setCurrentChat(updatedChat);
@@ -193,18 +231,34 @@ export default function ChatInterface() {
     setIsLoading(true);
 
     try {
-      // Envia o histórico da conversa junto com a mensagem
-      const response = await axios.post<{ response: Inseminacao[] }>('http://localhost:8000/chat', {
+      // Usar o nome do usuário atual ou o recém-detectado
+      const currentName = detectedName || userName;
+      
+      // Envia o histórico da conversa junto com a mensagem e o nome do usuário
+      const response = await axios.post('http://localhost:8000/chat', {
         message: inputText,
-        context: currentChat.messages.map(msg => ({ role: msg.sender, content: msg.text }))
+        context: currentChat.messages.map(msg => ({ role: msg.sender, content: msg.text })),
+        user_name: currentName // Envia o nome do usuário para o backend
       });
 
       console.log('Resposta:', response.data);
 
-      // Verifica se a resposta é um array de objetos
-      if (Array.isArray(response.data.response)) {
-        // Formata os dados para exibição
-        const formattedResponse = response.data.response
+      // Verifica se temos uma resposta do tipo { response: string, data: any[] }
+      if (response.data.response) {
+        const aiMessage: Message = {
+          id: generateId(),
+          text: response.data.response,
+          sender: 'ai',
+          timestamp: new Date()
+        };
+
+        setCurrentChat(prev => ({
+          ...prev,
+          messages: [...prev.messages, aiMessage]
+        }));
+      } else if (Array.isArray(response.data)) {
+        // Se for array direto, formata os dados (compatibilidade)
+        const formattedResponse = response.data
           .map((item: Inseminacao) => {
             return `
               Fazenda: ${item.FAZENDA},
@@ -219,7 +273,7 @@ export default function ChatInterface() {
               Perda: ${item.PERDA === 1 ? "Sim" : "Não"}
             `;
           })
-          .join("\n\n"); // Junta os itens com uma linha em branco entre eles
+          .join("\n\n");
         
         const aiMessage: Message = {
           id: generateId(),
@@ -233,10 +287,10 @@ export default function ChatInterface() {
           messages: [...prev.messages, aiMessage]
         }));
       } else {
-        // Se não for um array, trata como uma string
+        // Fallback para objetos desconhecidos
         const aiMessage: Message = {
           id: generateId(),
-          text: response.data.response || "Desculpe, houve um erro na resposta.",
+          text: "Recebi sua mensagem, mas não sei como processar a resposta.",
           sender: 'ai',
           timestamp: new Date()
         };
@@ -294,6 +348,12 @@ export default function ChatInterface() {
         >
           Novo Chat
         </button>
+
+        {userName && (
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg text-sm text-gray-700">
+            <span className="font-medium">Olá, {userName}!</span>
+          </div>
+        )}
 
         <div className="space-y-2">
           {[currentChat, ...pastChats].map((chat, index) => (
@@ -363,10 +423,27 @@ export default function ChatInterface() {
           </button>
 
           <h1 className="text-xl font-semibold text-gray-800">AI Assistant</h1>
+          
+          {userName && (
+            <span className="ml-auto text-sm text-gray-600">
+              Olá, {userName}
+            </span>
+          )}
         </div>
 
         {/* Mensagens */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {currentChat.messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center text-gray-500">
+              <h2 className="text-xl font-medium mb-2">Bem-vindo ao Assistente de Inseminação</h2>
+              <p className="max-w-md">
+                {userName 
+                  ? `Olá ${userName}! Como posso ajudar você hoje?` 
+                  : "Para uma experiência personalizada, por favor se apresente (exemplo: 'Me chamo João')"}
+              </p>
+            </div>
+          )}
+
           {currentChat.messages.map((message, index) => (
             <div
               key={index}
@@ -408,7 +485,7 @@ export default function ChatInterface() {
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Escreva sua mensagem..."
+              placeholder={userName ? "Digite sua mensagem..." : "Diga seu nome ou faça uma pergunta..."}
               className="text-black flex-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               disabled={isLoading}
             />
