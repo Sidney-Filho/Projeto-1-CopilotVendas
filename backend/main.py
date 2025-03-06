@@ -36,6 +36,7 @@ app.add_middleware(
 class MessageRequest(BaseModel):
     message: str
     context: list  # Histórico da conversa
+    user_name: str = ""  # Nome do usuário para personalização
 
 # Estrutura da tabela 'inseminacao'
 table_structure = [
@@ -68,6 +69,48 @@ table_structure = [
     {"column_name": "VAZIA COM OU SEM CL", "data_type": "integer", "is_nullable": "NO", "column_default": None},
     {"column_name": "PERDA", "data_type": "integer", "is_nullable": "NO", "column_default": None}
 ]
+
+def detect_query_intent(message: str) -> bool:
+    """
+    Detecta se a mensagem contém uma intenção de consulta de dados
+    Retorna True se parece ser uma consulta, False se for conversa casual
+    """
+    query_keywords = [
+        'consulta', 'consulte', 'busca', 'busque', 'mostre', 'listar', 'listar', 
+        'quantos', 'quantas', 'quais', 'qual', 'onde', 'quando',
+        'inseminação', 'inseminações', 'fazenda', 'fazendas', 'animal', 'animais',
+        'selecione', 'select', 'from', 'where', 'filtrar', 'filtro',
+        'touro', 'touros', 'raça', 'raças', 'protocolo', 'protocolos',
+        'dados', 'estatísticas', 'média', 'total', 'soma', 'count', 'contar'
+    ]
+    
+    # Verifica se alguma palavra-chave está presente na mensagem
+    message_lower = message.lower()
+    for keyword in query_keywords:
+        if keyword in message_lower:
+            return True
+    
+    return False
+
+def extract_user_name(context: list) -> str:
+    """
+    Tenta extrair o nome do usuário a partir do histórico da conversa
+    """
+    name_patterns = [
+        r'(?:me\s+chamo|meu\s+nome\s+(?:é|e)|sou\s+(?:o|a))\s+([A-Z][a-z]+)',
+        r'(?:pode\s+me\s+chamar\s+de)\s+([A-Z][a-z]+)',
+        r'(?:meu\s+nome\s+(?:é|e))\s+([A-Z][a-z]+)'
+    ]
+    
+    for message in context:
+        if 'user' in message and 'content' in message:
+            content = message['content']
+            for pattern in name_patterns:
+                match = re.search(pattern, content)
+                if match:
+                    return match.group(1)
+    
+    return ""
 
 def clean_sql_query(query: str) -> str:
     """
@@ -174,7 +217,48 @@ def simple_query(user_message: str) -> Tuple[List[Dict[str, Any]], str]:
         print(f"Erro no simple_query: {str(e)}")
         return [], f"Erro: {str(e)}"
 
-def generate_natural_response(user_message: str, data: List[Dict[str, Any]], sql_query: str) -> str:
+def generate_conversation_response(user_message: str, context: list, user_name: str = "") -> str:
+    """
+    Gera uma resposta conversacional para interações casuais
+    """
+    conversation_history = []
+    
+    # Formatar contexto para o formato do OpenAI
+    for message in context[-10:]:  # Usar apenas as últimas 10 mensagens para contexto
+        if 'role' in message and 'content' in message:
+            conversation_history.append({
+                "role": message["role"],
+                "content": message["content"]
+            })
+    
+    # Adicionar a mensagem atual do usuário
+    conversation_history.append({
+        "role": "user",
+        "content": user_message
+    })
+    
+    # Adicionar instruções de sistema para personalização
+    system_message = (
+        "Você é um assistente virtual especializado em dados de inseminação de animais, "
+        "ajudando fazendeiros e veterinários a gerenciar seus registros. "
+        "Seja amigável, direto e profissional. "
+    )
+    
+    if user_name:
+        system_message += f"Sempre se dirija ao usuário pelo nome {user_name} quando apropriado. "
+    
+    # Fazer a chamada para a API do OpenAI
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": system_message},
+            *conversation_history
+        ]
+    )
+    
+    return response.choices[0].message.content
+
+def generate_natural_response(user_message: str, data: List[Dict[str, Any]], sql_query: str, user_name: str = "") -> str:
     """
     Gera uma resposta em linguagem natural com base nos resultados da consulta
     """
@@ -182,7 +266,16 @@ def generate_natural_response(user_message: str, data: List[Dict[str, Any]], sql
         # Limitar o número de exemplos para o prompt
         sample_data = data[:5] if len(data) > 5 else data
         
-        prompt = (
+        system_message = (
+            "Você é um assistente virtual especializado em dados de inseminação de animais, "
+            "ajudando fazendeiros e veterinários a interpretar seus dados. "
+            "Seja conciso, informativo e profissional. "
+        )
+        
+        if user_name:
+            system_message += f"Sempre se dirija ao usuário pelo nome {user_name} quando apropriado. "
+        
+        user_prompt = (
             f"Pergunta do usuário: '{user_message}'\n\n"
             f"Consulta SQL executada: {sql_query}\n\n"
             f"Resultados ({len(data)} registros encontrados): {json.dumps(sample_data, ensure_ascii=False)}\n\n"
@@ -192,33 +285,54 @@ def generate_natural_response(user_message: str, data: List[Dict[str, Any]], sql
         
         ai_response = client.chat.completions.create(
             model="gpt-4",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_prompt}
+            ]
         )
         
         return ai_response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Erro ao gerar resposta natural: {str(e)}")
         # Resposta de fallback
+        greeting = f"Olá{' ' + user_name if user_name else ''}! " if user_name else ""
         if data:
-            return f"Encontrei {len(data)} registros que correspondem à sua consulta sobre inseminações."
+            return f"{greeting}Encontrei {len(data)} registros que correspondem à sua consulta sobre inseminações."
         else:
-            return "Não encontrei nenhum registro que corresponda à sua consulta sobre inseminações."
+            return f"{greeting}Não encontrei nenhum registro que corresponda à sua consulta sobre inseminações."
 
 @app.post("/chat")
 async def chat_with_ai(request: MessageRequest):
     try:
-        # Executar a consulta no Supabase
-        data, sql_query = execute_supabase_query(request.message)
+        # Extrair o nome do usuário do contexto se não fornecido
+        user_name = request.user_name or extract_user_name(request.context)
         
-        # Gerar resposta em linguagem natural
-        response = generate_natural_response(request.message, data, sql_query)
-        
-        return JSONResponse(content={
-            "data": data,
-            "response": response,
-            "sql": sql_query,
-            "count": len(data)
-        })
+        # Verificar se a mensagem parece ser uma consulta de dados ou uma conversa casual
+        if detect_query_intent(request.message):
+            # Executar a consulta no Supabase
+            data, sql_query = execute_supabase_query(request.message)
+            
+            # Gerar resposta em linguagem natural com base nos dados
+            response = generate_natural_response(request.message, data, sql_query, user_name)
+            
+            return JSONResponse(content={
+                "data": data,
+                "response": response,
+                "sql": sql_query,
+                "count": len(data),
+                "is_query": True
+            })
+        else:
+            # Tratar como conversa casual
+            response = generate_conversation_response(request.message, request.context, user_name)
+            
+            return JSONResponse(content={
+                "data": [],
+                "response": response,
+                "sql": "",
+                "count": 0,
+                "is_query": False
+            })
     except Exception as e:
         print(f"Erro no endpoint /chat: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
